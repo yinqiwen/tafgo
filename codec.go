@@ -439,7 +439,8 @@ func decodeTagIntegerValue(buf *bytes.Buffer, tag uint8, required bool, typeValu
 		}
 	} else {
 		if required {
-			return 0, fmt.Errorf("require field not exist, tag:%d", tag)
+			//panic(fmt.Errorf("'%d' require field not exist, tag:%d", typeValue, tag))
+			return 0, fmt.Errorf("'%d' require field not exist, tag:%d", typeValue, tag)
 		}
 	}
 	return 0, nil
@@ -483,7 +484,7 @@ func decodeTagFloatDoubleValue(buf *bytes.Buffer, tag uint8, required bool, type
 		}
 	} else {
 		if required {
-			return 0, fmt.Errorf("require field not exist, tag:%d", tag)
+			return 0, fmt.Errorf("float64 require field not exist, tag:%d", tag)
 		}
 	}
 	return float64(0), nil
@@ -517,7 +518,7 @@ func decodeTagStringValue(buf *bytes.Buffer, tag uint8, required bool) (string, 
 		return string(buf.Next(strLen)), nil
 	} else {
 		if required {
-			return "", fmt.Errorf("require field not exist, tag:%d", tag)
+			return "", fmt.Errorf("string require field not exist, tag:%d", tag)
 		}
 	}
 	return "", nil
@@ -649,7 +650,7 @@ func decodeTagValue(buf *bytes.Buffer, tag uint8, required bool, v *reflect.Valu
 				}
 			} else {
 				if required {
-					return fmt.Errorf("require field not exist, tag:%d", tag)
+					return fmt.Errorf("type require field not exist, tag:%d", tag)
 				}
 			}
 		}
@@ -795,7 +796,7 @@ func EncodeTagVectorValue(buf *bytes.Buffer, v interface{}, tag uint8) error {
 			if ok {
 				EncodeTagStructValue(buf, ts, 0)
 			} else {
-				encodeValueWithTag(buf, tag, &e)
+				encodeValueWithTag(buf, 0, &e)
 			}
 		}
 	} else {
@@ -953,7 +954,7 @@ func DecodeTagStructValue(buf *bytes.Buffer, v TafStruct, tag uint8, required bo
 	}
 	if !flag {
 		if required {
-			return fmt.Errorf("require field not exist, tag:%d", tag)
+			return fmt.Errorf("require field not exist, tag:%d, type %T", tag, v)
 		}
 		return nil
 	}

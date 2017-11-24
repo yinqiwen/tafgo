@@ -36,6 +36,16 @@ type rpcChannel struct {
 	running bool
 }
 
+func (c *rpcChannel) close() {
+	if nil != c.Conn {
+		c.Conn.Close()
+	}
+	if nil != c.ch {
+		close(c.ch)
+	}
+	c.running = false
+}
+
 func parseEndpoint(s string) (EndpointF, error) {
 	e := EndpointF{}
 	fields := strings.Fields(s)
@@ -157,9 +167,7 @@ func (c *Client) getRPCSession(sid int32) *rpcSession {
 
 func (c *Client) closeRPCChannel(channel *rpcChannel) {
 	c.clientsMutex.Lock()
-	channel.Conn.Close()
-	channel.running = false
-	close(channel.ch)
+	channel.close()
 	c.clients[channel.idx] = nil
 	c.clientsMutex.Unlock()
 }
@@ -241,11 +249,16 @@ func (c *Client) newRPCChannel(idx int) *rpcChannel {
 		return nil
 	}
 	rc.ch = make(chan TafStruct, 100)
+
+	c.clientsMutex.Lock()
+	defer c.clientsMutex.Unlock()
+	if nil != c.clients[idx] {
+		rc.close()
+		return c.clients[idx]
+	}
+	c.clients[idx] = rc
 	go c.rpcChannelWrite(rc)
 	go c.rpcChannelRead(rc)
-	c.clientsMutex.Lock()
-	c.clients[idx] = rc
-	c.clientsMutex.Unlock()
 	return rc
 }
 

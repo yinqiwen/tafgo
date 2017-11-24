@@ -250,7 +250,7 @@ func (c *Client) newRPCChannel(idx int) *rpcChannel {
 }
 
 func (c *Client) getRPCChannel() *rpcChannel {
-	minCounter := int64(0)
+	minCounter := int64(-1)
 	minIdx := 0
 	for i, client := range c.clients {
 		if nil == client {
@@ -261,7 +261,7 @@ func (c *Client) getRPCChannel() *rpcChannel {
 				return client
 			}
 		}
-		if minCounter > client.counter {
+		if minCounter > client.counter || minCounter < 0 {
 			minCounter = client.counter
 			minIdx = i
 		}

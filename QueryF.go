@@ -8,6 +8,7 @@ package tafgo
 
 import (
 	"bytes"
+	"log"
 	"time"
 )
 
@@ -38,6 +39,7 @@ func (p *QueryFProxy) FindObjectById(id string, context map[string]string) (_ret
 	respBuffer := bytes.NewBuffer(rep.SBuffer)
 	tafErr = DecodeTagVectorValue(respBuffer, &_ret, 0, true)
 	if nil != tafErr {
+		log.Printf("####%v %d", tafErr, len(rep.SBuffer))
 		return
 	}
 	return

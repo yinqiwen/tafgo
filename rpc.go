@@ -129,16 +129,61 @@ type Client struct {
 	sessionMutex   sync.Mutex
 	clientsMutex   sync.Mutex
 	endpointCursor int32
+
+	defNamingSrv   *QueryFProxy
+	refreshTime    time.Time
+	endpointsMutex sync.Mutex
 }
 
+//func (c *Client) selectEndpoint() EndpointF {
+//cursor := c.endpointCursor
+//if int(cursor) < len(c.endpoints) {
+//atomic.AddInt32(&c.endpointCursor, 1)
+//return c.endpoints[cursor]
+//}
+//atomic.StoreInt32(&c.endpointCursor, 1)
+//return c.endpoints[0]
+//}
+
 func (c *Client) selectEndpoint() EndpointF {
-	cursor := c.endpointCursor
-	if int(cursor) < len(c.endpoints) {
-		atomic.AddInt32(&c.endpointCursor, 1)
-		return c.endpoints[cursor]
+	c.endpointsMutex.Lock()
+	var endpoint EndpointF
+	if int(c.endpointCursor) < len(c.endpoints) {
+		endpoint = c.endpoints[c.endpointCursor]
+		c.endpointCursor++
+	} else if len(c.endpoints) > 0 {
+		endpoint = c.endpoints[0]
+		c.endpointCursor = 1
+	} else {
+		log.Printf("ERROR endpoints size 0")
 	}
-	atomic.StoreInt32(&c.endpointCursor, 1)
-	return c.endpoints[0]
+	log.Printf("selectEndpoint cursor:%d endpoint:%v", c.endpointCursor-1, endpoint)
+	c.endpointsMutex.Unlock()
+	return endpoint
+}
+
+func (c *Client) refreshEndpoint() {
+	now := time.Now()
+	if now.Sub(c.refreshTime) < 30*time.Second {
+		return
+	}
+
+	go func() {
+		if c.defNamingSrv != nil {
+			endpoints, _, err := c.defNamingSrv.FindObjectById(c.servant, nil)
+			if err != nil {
+				log.Printf("FindObjectById Failed reason:%v", err)
+			} else {
+				c.endpointsMutex.Lock()
+				if now.Sub(c.refreshTime) >= 30*time.Second {
+					c.endpoints = endpoints
+					c.refreshTime = time.Now()
+					log.Printf("FindObjectById endpoints:%v refreshTime:%v", c.endpoints, c.refreshTime)
+				}
+				c.endpointsMutex.Unlock()
+			}
+		}
+	}()
 }
 
 func (c *Client) newRPCSession(sid int32) *rpcSession {
@@ -283,6 +328,7 @@ func (c *Client) getRPCChannel() *rpcChannel {
 }
 
 func (c *Client) Invoke(ctype uint8, funcName string, req *bytes.Buffer, ctx map[string]string) (*ResponsePacket, error) {
+	c.refreshEndpoint()
 	packet := RequestPacket{}
 	packet.SBuffer = req.Bytes()
 	packet.IVersion = 1
@@ -294,18 +340,22 @@ func (c *Client) Invoke(ctype uint8, funcName string, req *bytes.Buffer, ctx map
 	packet.ITimeout = 1000
 	session := c.newRPCSession(packet.IRequestId)
 	rpcConn := c.getRPCChannel()
-	rpcConn.ch <- &packet
 	var err error
 	var resp *ResponsePacket
-	select {
-	case resp = <-session.ch:
-		break
-	case <-time.After(c.Timeout):
-		err = ErrTafRPCTimeout
-	}
+	if rpcConn != nil {
+		rpcConn.ch <- &packet
+		select {
+		case resp = <-session.ch:
+			break
+		case <-time.After(c.Timeout):
+			err = ErrTafRPCTimeout
+		}
 
-	if nil == resp && nil == err {
-		err = fmt.Errorf("No response recevied, maybe timeout")
+		if nil == resp && nil == err {
+			err = fmt.Errorf("No response recevied, maybe timeout")
+		}
+	} else {
+		err = fmt.Errorf("rpcConn ERROR")
 	}
 	c.closeRPCSession(packet.IRequestId)
 	return resp, err
@@ -328,7 +378,15 @@ func NewClient(addr string, timeout time.Duration) *Client {
 	} else {
 		c.servant = addr
 		if nil != DefaultNamingService {
-			c.endpoints, _, _ = DefaultNamingService.FindObjectById(addr, nil)
+			endpoints, _, err := DefaultNamingService.FindObjectById(addr, nil)
+			if err != nil {
+				log.Printf("FindObjectById Failed reason:%v", err)
+			} else {
+				c.defNamingSrv = DefaultNamingService
+				c.endpoints = endpoints
+				c.refreshTime = time.Now()
+				log.Printf("FindObjectById endpoints:%v addr%s", c.endpoints, addr)
+			}
 		}
 	}
 	c.Timeout = timeout

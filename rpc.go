@@ -135,16 +135,6 @@ type Client struct {
 	endpointsMutex sync.Mutex
 }
 
-//func (c *Client) selectEndpoint() EndpointF {
-//cursor := c.endpointCursor
-//if int(cursor) < len(c.endpoints) {
-//atomic.AddInt32(&c.endpointCursor, 1)
-//return c.endpoints[cursor]
-//}
-//atomic.StoreInt32(&c.endpointCursor, 1)
-//return c.endpoints[0]
-//}
-
 func (c *Client) selectEndpoint() EndpointF {
 	c.endpointsMutex.Lock()
 	var endpoint EndpointF
@@ -157,7 +147,6 @@ func (c *Client) selectEndpoint() EndpointF {
 	} else {
 		log.Printf("ERROR endpoints size 0")
 	}
-	log.Printf("selectEndpoint cursor:%d endpoint:%v", c.endpointCursor-1, endpoint)
 	c.endpointsMutex.Unlock()
 	return endpoint
 }
@@ -175,10 +164,9 @@ func (c *Client) refreshEndpoint() {
 				log.Printf("FindObjectById Failed reason:%v", err)
 			} else {
 				c.endpointsMutex.Lock()
-				if now.Sub(c.refreshTime) >= 30*time.Second {
+				if now.Sub(c.refreshTime) >= 30*time.Second && len(endpoints) > 0 {
 					c.endpoints = endpoints
 					c.refreshTime = time.Now()
-					log.Printf("FindObjectById endpoints:%v refreshTime:%v", c.endpoints, c.refreshTime)
 				}
 				c.endpointsMutex.Unlock()
 			}
@@ -385,7 +373,6 @@ func NewClient(addr string, timeout time.Duration) *Client {
 				c.defNamingSrv = DefaultNamingService
 				c.endpoints = endpoints
 				c.refreshTime = time.Now()
-				log.Printf("FindObjectById endpoints:%v addr%s", c.endpoints, addr)
 			}
 		}
 	}

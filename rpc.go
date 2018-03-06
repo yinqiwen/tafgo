@@ -21,7 +21,8 @@ const (
 	JCEONEWAY = uint8(1)
 )
 
-var ErrTafRPCTimeout = errors.New("Taf RPC timeout")
+var ErrRPCTimeout = errors.New("RPC timeout")
+var ErrRPCNoTarget = errors.New("No target address for RPC")
 
 type rpcSession struct {
 	ID int32
@@ -121,24 +122,28 @@ type Client struct {
 	Timeout time.Duration
 	MaxConn int
 
-	endpoints []EndpointF
-	clients   []*rpcChannel
-	sessions  map[int32]*rpcSession
-	sid       int32
+	//endpoints []EndpointF
+	clients  []*rpcChannel
+	sessions map[int32]*rpcSession
+	sid      int32
 
 	sessionMutex   sync.Mutex
 	clientsMutex   sync.Mutex
 	endpointCursor int32
 }
 
-func (c *Client) selectEndpoint() EndpointF {
+func (c *Client) selectEndpoint() *EndpointF {
+	endpoints := getEndpoints(c.servant)
+	if len(endpoints) == 0 {
+		return nil
+	}
 	cursor := c.endpointCursor
-	if int(cursor) < len(c.endpoints) {
+	if int(cursor) < len(endpoints) {
 		atomic.AddInt32(&c.endpointCursor, 1)
-		return c.endpoints[cursor]
+		return &endpoints[cursor]
 	}
 	atomic.StoreInt32(&c.endpointCursor, 1)
-	return c.endpoints[0]
+	return &endpoints[0]
 }
 
 func (c *Client) newRPCSession(sid int32) *rpcSession {
@@ -242,6 +247,9 @@ func (c *Client) newRPCChannel(idx int) *rpcChannel {
 	rc.running = true
 	var err error
 	endpoint := c.selectEndpoint()
+	if nil == endpoint {
+		return nil
+	}
 	addr := fmt.Sprintf("%s:%d", endpoint.Host, endpoint.Port)
 	rc.Conn, err = net.Dial("tcp", addr)
 	if nil != err {
@@ -294,6 +302,9 @@ func (c *Client) Invoke(ctype uint8, funcName string, req *bytes.Buffer, ctx map
 	packet.ITimeout = 1000
 	session := c.newRPCSession(packet.IRequestId)
 	rpcConn := c.getRPCChannel()
+	if nil == rpcConn {
+		return nil, ErrRPCNoTarget
+	}
 	rpcConn.ch <- &packet
 	var err error
 	var resp *ResponsePacket
@@ -301,7 +312,7 @@ func (c *Client) Invoke(ctype uint8, funcName string, req *bytes.Buffer, ctx map
 	case resp = <-session.ch:
 		break
 	case <-time.After(c.Timeout):
-		err = ErrTafRPCTimeout
+		err = ErrRPCTimeout
 	}
 
 	if nil == resp && nil == err {
@@ -317,18 +328,24 @@ func NewClient(addr string, timeout time.Duration) *Client {
 	if len(ss) == 2 {
 		c.servant = ss[0]
 		endpoints := strings.Split(ss[1], ":")
+		v := make([]EndpointF, 0)
 		for _, endpoint := range endpoints {
 			e, err := parseEndpoint(endpoint)
 			if nil != err {
 				log.Printf("Invalid endpoint %s for reason:%v", endpoint, err)
 			} else {
-				c.endpoints = append(c.endpoints, e)
+				v = append(v, e)
 			}
 		}
+		saveEndpoints(c.servant, v)
 	} else {
 		c.servant = addr
 		if nil != DefaultNamingService {
-			c.endpoints, _, _ = DefaultNamingService.FindObjectById(addr, nil)
+			addWatchObj(c.servant)
+			//c.endpoints, _, _ = DefaultNamingService.FindObjectById(addr, nil)
+		} else {
+			log.Printf("ERROR:No default naming set for address:%s", addr)
+			return nil
 		}
 	}
 	c.Timeout = timeout

@@ -30,6 +30,8 @@ var ErrBufferPeekOverflow = errors.New("Buffer overflow when peekBuf")
 var ErrJceDecodeRequireNotExist = errors.New("require field not exist, tag:")
 var ErrNotTafStruct = errors.New("Invalid 'TafStruct' value")
 
+var tafStructType = reflect.TypeOf(new(TafStruct)).Elem()
+
 type InvalidUnmarshalError struct {
 	Type reflect.Type
 }
@@ -186,11 +188,18 @@ func encodeValueWithTag(buf *bytes.Buffer, tag uint8, v *reflect.Value) error {
 		return encodeValueWithTag(buf, tag, &rv)
 	case reflect.Struct:
 		encodeHeaderTag(tag, uint8(TafHeadeStructBegin), buf)
-		ts, ok := v.Interface().(TafStruct)
-		if !ok {
-			log.Printf("Invalid type:%v", v.Type())
+		if reflect.PtrTo(v.Type()).Implements(tafStructType) {
+			if v.CanAddr() {
+				ts := v.Addr().Interface().(TafStruct)
+				ts.Encode(buf)
+			} else {
+				tmp := reflect.New(v.Type())
+				tmp.Elem().Set(*v)
+				ts := tmp.Interface().(TafStruct)
+				ts.Encode(buf)
+			}
 		} else {
-			ts.Encode(buf)
+			log.Printf("Invalid type:%v to encode.", v.Type())
 		}
 		// num := v.NumField()
 		// for i := 0; i < num; i++ {
